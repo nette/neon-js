@@ -24,6 +24,7 @@
 		"node": ">=22.0.0"
 	},
 	"scripts": {
+		"spec": "node tests/fetch-spec.mjs",
 		"test": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && vitest run",
 		"lint": "eslint --cache",
 		"lint:fix": "eslint --cache --fix"
