@@ -1,0 +1,41 @@
+{
+	"name": "@nette/neon",
+	"version": "0.1.0",
+	"description": "NEON parser, encoder and lossless editor: change a value in a config file and keep its comments and formatting.",
+	"keywords": [
+		"neon",
+		"nette",
+		"parser",
+		"config",
+		"format-preserving",
+		"round-trip",
+		"yaml-alternative",
+		"cst"
+	],
+	"type": "module",
+	"license": "MIT",
+	"author": "David Grudl",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nette/neon-js.git"
+	},
+	"homepage": "https://neon.nette.org",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"scripts": {
+		"test": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && vitest run",
+		"lint": "eslint --cache",
+		"lint:fix": "eslint --cache --fix"
+	},
+	"devDependencies": {
+		"@nette/eslint-plugin": "^0.3.1",
+		"@types/node": "^22.20.5",
+		"eslint": "^10.12.0",
+		"globals": "^17.13.0",
+		"tsx": "^4.23.15",
+		"typescript": "~6.0.3",
+		"typescript-eslint": "^8.71.0",
+		"vitest": "^5.0.3"
+	}
+}
