@@ -1,5 +1,7 @@
-import { forgetOrigin, record, setLeading, setTrailing } from './internal.ts';
+import { forgetOrigin, record, setLeading, setParent, setTrailing } from './internal.ts';
 import { Scanner } from './scanner.ts';
+import { DocumentNode, type Node } from './nodes.ts';
+import { Cursor } from './position.ts';
 
 
 export type TokenKind
@@ -93,6 +95,7 @@ export class Token {
 	#text: string;
 	#leadingTrivia: readonly Trivia[];
 	#trailingTrivia: readonly Trivia[];
+	#parent: Node | null = null;
 
 
 	/** Prefer Token.fromText(); the text must be one token of the kind and the trivia canonical. */
@@ -156,6 +159,11 @@ export class Token {
 	}
 
 
+	get parent(): Node | null {
+		return this.#parent;
+	}
+
+
 	/** Replaces the text by another one of the same kind. */
 	setText(text: string): this {
 		checkText(this.#kind, text);
@@ -166,12 +174,28 @@ export class Token {
 	}
 
 
+	/** Sets the leading trivia; in a document also checks them against the token before. */
 	setLeadingTrivia(trivia: readonly Trivia[]): this {
+		checkTrivia(trivia, 'leading', this.#kind === 'EndOfFile');
+		const [before] = neighbours(this);
+		if (before && trivia.length && !before.trailingTrivia.some((t) => t.kind === 'LineEnding')) {
+			throw new TypeError('Leading trivia must follow a line ending; on the same line they are the trailing trivia of the token before.');
+		} else if (before && trivia[0]?.kind === 'ByteOrderMark') {
+			throw new TypeError('A byte order mark may only stand at the start of the input.');
+		}
 		return this[setLeading](trivia);
 	}
 
 
+	/** Sets the trailing trivia; in a document also checks them against the token after. */
 	setTrailingTrivia(trivia: readonly Trivia[]): this {
+		checkTrivia(trivia, 'trailing', this.#kind === 'EndOfFile');
+		const [, after] = neighbours(this);
+		if (after && after.leadingTrivia.length && !trivia.some((t) => t.kind === 'LineEnding')) {
+			throw new TypeError('Trailing trivia without a line ending must not be followed by leading trivia.');
+		} else if (after && after.kind !== 'EndOfFile' && trivia.at(-1)?.kind === 'Comment') {
+			throw new TypeError('A comment must be followed by a line ending.');
+		}
 		return this[setTrailing](trivia);
 	}
 
@@ -198,6 +222,30 @@ export class Token {
 	/** A detached copy with the same text, trivia and origin. */
 	clone(): Token {
 		return trustedToken(this.#kind, this.#text, this.#leadingTrivia, this.#trailingTrivia, this.#origin);
+	}
+
+
+	/** The current position, computed by a walk from the root; null in a detached subtree. */
+	getPosition(): Position | null {
+		let root = this.#parent;
+		while (root?.parent) {
+			root = root.parent;
+		}
+		if (!(root instanceof DocumentNode)) {
+			return null;
+		}
+
+		let text = '';
+		for (const token of root.getTokens()) {
+			if (token === this) {
+				for (const trivia of this.#leadingTrivia) {
+					text += trivia.text;
+				}
+				return new Cursor(text).at(text.length);
+			}
+			text += token.toString();
+		}
+		return null;
 	}
 
 
@@ -239,6 +287,14 @@ export class Token {
 	[forgetOrigin](): void {
 		this.#origin = null;
 	}
+
+
+	/** @internal */
+	[setParent](parent: Node | null): void {
+		const old = this.#parent;
+		record(() => this.#parent = old);
+		this.#parent = parent;
+	}
 }
 
 
@@ -259,6 +315,50 @@ export function trustedToken(kind: TokenKind, text: string, leading: readonly Tr
 function checkText(kind: TokenKind, text: string): void {
 	if (!text.isWellFormed() || (kind === 'EndOfFile' ? text !== '' : scanSingleToken(text) !== kind)) {
 		throw new TypeError(`${JSON.stringify(text)} is not one token of kind ${kind}.`);
+	}
+}
+
+
+/** The tokens before and after one in a document; none when it is not in a document. */
+function neighbours(token: Token): [Token | null, Token | null] {
+	let root = token.parent;
+	while (root?.parent) {
+		root = root.parent;
+	}
+	return root instanceof DocumentNode ? [findNeighbour(token, true), findNeighbour(token, false)] : [null, null];
+}
+
+
+/** The token of the tree right before or after one. */
+export function findNeighbour(token: Token, backward: boolean): Token | null {
+	for (const neighbour of iterateNeighbours(token, backward)) {
+		return neighbour;
+	}
+	return null;
+}
+
+
+/** The tokens of the tree before or after one, the nearest first, read lazily from the nodes around it. */
+export function* iterateNeighbours(token: Token, backward: boolean): Generator<Token> {
+	let child: Node | Token = token;
+	for (let node = token.parent; node; child = node, node = node.parent) {
+		const children = node.getChildren();
+		const i = children.indexOf(child);
+		for (const sibling of backward ? children.slice(0, i).reverse() : children.slice(i + 1)) {
+			yield* iterateTokens(sibling, backward);
+		}
+	}
+}
+
+
+function* iterateTokens(node: Node | Token, backward: boolean): Generator<Token> {
+	if (node instanceof Token) {
+		yield node;
+		return;
+	}
+	const children = node.getChildren();
+	for (const child of backward ? children.toReversed() : children) {
+		yield* iterateTokens(child, backward);
 	}
 }
 

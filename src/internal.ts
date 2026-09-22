@@ -1,4 +1,7 @@
 /** Keys of the members that only the tree itself may call. They are not exported from the package. */
+export const setParent: unique symbol = Symbol('setParent');
+export const setItems: unique symbol = Symbol('setItems');
+export const setSlots: unique symbol = Symbol('setSlots');
 export const setLeading: unique symbol = Symbol('setLeading');
 export const setTrailing: unique symbol = Symbol('setTrailing');
 export const forgetOrigin: unique symbol = Symbol('forgetOrigin');
