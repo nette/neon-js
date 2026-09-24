@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import { dump } from '../src/dumper.ts';
 import { NeonError } from '../src/errors.ts';
 import { parse } from '../src/parser.ts';
 import { decodeUtf8 } from '../src/utf8.ts';
@@ -38,5 +39,26 @@ describe('errors', () => {
 		const expected = c.read('.error');
 		expect(expected, 'expectation').not.toBeNull();
 		expect(error(c.readBytes('.neon')!)).toBe(expected);
+	});
+});
+
+
+describe('cst', () => {
+	test.each(loadCases('cst').filter(runsHere).map((c) => [c.name, c]))('%s', (_, c) => {
+		const input = c.read('.neon')!;
+		const document = parse(input);
+		expect(document.print()).toBe(input);
+		expect(dump(document)).toBe(c.read('.dump'));
+	});
+});
+
+
+describe('roundtrip', () => {
+	test.each(loadCases('roundtrip').filter(runsHere).map((c) => [c.name, c]))('%s', (_, c) => {
+		const input = c.read('.neon')!;
+		const document = parse(input);
+		expect(document.print()).toBe(input);
+		document.toValue();
+		expect(dump(document)).toBe(c.read('.dump'));
 	});
 });
