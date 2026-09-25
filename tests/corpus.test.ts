@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { dump } from '../src/dumper.ts';
+import { encode } from '../src/encoder.ts';
 import { NeonError } from '../src/errors.ts';
 import { parse } from '../src/parser.ts';
 import { decodeUtf8 } from '../src/utf8.ts';
 import { loadCases, runsHere } from './corpus.ts';
-import { equal, toHost, type Typed } from './typed.ts';
+import { equal, toEncodable, toHost, type Typed } from './typed.ts';
 
 
 const error = (bytes: Buffer): string => {
@@ -60,5 +61,23 @@ describe('roundtrip', () => {
 		expect(document.print()).toBe(input);
 		document.toValue();
 		expect(dump(document)).toBe(c.read('.dump'));
+	});
+});
+
+
+describe('encode', () => {
+	test.each(loadCases('encode').filter(runsHere).map((c) => [c.name, c]))('%s', (_, c) => {
+		const value = toEncodable(JSON.parse(c.read('.json')!) as Typed);
+		const options = { indentation: c.meta.indentation };
+		const depth = c.meta.blockMode ?? true;
+		const block = { ...options, blockMode: typeof depth === 'number' ? (_: unknown, path: readonly string[]) => path.length < depth : depth };
+		const error = c.read('.error');
+		if (error !== null) {
+			expect(() => encode(value, options)).toThrow(error.trim());
+			expect(() => encode(value, block)).toThrow(error.trim());
+			return;
+		}
+		expect(encode(value, options)).toBe(c.read('.neon'));
+		expect(encode(value, block)).toBe(c.read('.block.neon'));
 	});
 });
