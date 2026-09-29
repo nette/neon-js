@@ -1,5 +1,18 @@
 import { NeonError } from './errors.ts';
-import { record, setItems, setParent, setSlots } from './internal.ts';
+import {
+	arrayOf,
+	addItem,
+	detachNode,
+	type PathSegment,
+	replaceNode,
+	resolvePath,
+	setByPath,
+	setDocumentNode,
+	setItemKey,
+	setItemNode,
+	setItemValue,
+} from './editing.ts';
+import { atomic, record, setItems, setParent, setSlots } from './internal.ts';
 import { type Position, Token, type Trivia } from './token.ts';
 import {
 	Chain,
@@ -18,7 +31,7 @@ import {
 type Child = Node | Token;
 
 
-type NodeClass<T extends Node> = abstract new (...args: any[]) => T;
+export type NodeClass<T extends Node> = abstract new (...args: any[]) => T;
 
 
 /** Base of all nodes of the syntax tree. */
@@ -183,6 +196,19 @@ export abstract class ValueNode extends Node {
 
 
 	abstract override clone(): ValueNode;
+
+
+	/** Puts the node into the slot of this one, which decides what that means; the node gets the trivia at the edges of this one in place of its own. */
+	replaceWith(node: ValueNode): void {
+		atomic(() => replaceNode(this, node));
+	}
+
+
+	/** Takes the node out of the tree, with the trivia at its edges; the emptied slot gets null. */
+	detach(): this {
+		atomic(() => detachNode(this));
+		return this;
+	}
 }
 
 
@@ -224,6 +250,12 @@ export class DocumentNode extends Node {
 	}
 
 
+	/** The same as setValue([], node): the node takes the place of the root, null empties the document. */
+	set value(node: ValueNode | null) {
+		atomic(() => setDocumentNode(this, node));
+	}
+
+
 	get endOfFile(): Token {
 		return this.#endOfFile;
 	}
@@ -251,6 +283,57 @@ export class DocumentNode extends Node {
 
 	toValue(): NeonValue {
 		return this.#value?.toValue() ?? null;
+	}
+
+
+	/** The item at the path of keys, the same keys decode() gives; a path continues into the attributes of an entity. */
+	findItem(path: readonly PathSegment[]): ArrayItemNode | null {
+		try {
+			return path.length ? resolvePath(this, path) : null;
+		} catch (e) {
+			if (e instanceof NeonError) {
+				return null;
+			}
+			throw e;
+		}
+	}
+
+
+	/** Writes the value at the path; a missing last key is added, unless create is false. */
+	setValue(path: readonly PathSegment[], value: unknown, options: { create?: boolean } = {}): void {
+		atomic(() => setByPath(this, path, value, options.create ?? true));
+	}
+
+
+	/** Adds an item to the array at the path, without a key unless given one. */
+	addItem(path: readonly PathSegment[], value: unknown, options: { key?: string; position?: number } = {}): ArrayItemNode {
+		return atomic(() => {
+			const owner = path.length ? resolvePath(this, path) : null;
+			const container = owner ? owner.value : this.#value;
+			const array = arrayOf(container);
+			if (array) {
+				return addItem(array, options.key ?? null, value, options.position);
+			} else if (container === null) {
+				if (options.position !== undefined && options.position !== 0) {
+					throw new RangeError(`Position ${options.position} is out of the array.`);
+				}
+				const key = options.key ?? null;
+				const placeholder = value instanceof ValueNode ? null : value; // a node comes into the item as into any other
+				setByPath(this, path, key === null ? [placeholder] : new Map([[key, placeholder]]), true);
+				const item = (arrayOf(owner ? owner.value : this.#value) as ArrayNode).items[0]!;
+				if (value instanceof ValueNode) {
+					item.setValue(value);
+				}
+				return item;
+			}
+			throw new NeonError(`The value at ${path.join('.')} is not an array`);
+		});
+	}
+
+
+	/** Renames the key of the item at the path. */
+	setKey(path: readonly PathSegment[], key: string): void {
+		atomic(() => setItemKey(resolvePath(this, path), key));
 	}
 
 
@@ -301,6 +384,12 @@ export abstract class ArrayNode extends ValueNode {
 	findItem(key: string | number): ArrayItemNode | null {
 		const map = resolveKeys(this.items);
 		return map.get(String(key)) ?? null;
+	}
+
+
+	/** Adds an item built from the value, at the end or before the item at the position. */
+	addItem(value: unknown, options: { key?: string; position?: number } = {}): ArrayItemNode {
+		return atomic(() => addItem(this, options.key ?? null, value, options.position));
 	}
 
 
@@ -483,6 +572,12 @@ export class ArrayItemNode extends Node {
 	}
 
 
+	/** The same as setValue(node) with a node: the node takes the place of the value, null empties it. */
+	set value(node: ValueNode | null) {
+		atomic(() => setItemNode(this, node));
+	}
+
+
 	get separator(): Token | null {
 		return this.#separator;
 	}
@@ -555,6 +650,21 @@ export class ArrayItemNode extends Node {
 	getIndentation(): string {
 		const trivia = this.getFirstToken().leadingTrivia.at(-1);
 		return trivia?.kind === 'Whitespace' ? trivia.text : '';
+	}
+
+
+	/**
+	 * Writes the value: a value of the host or a node. Writing an equal value changes nothing; a new
+	 * scalar keeps the style of the old one where it can.
+	 */
+	setValue(value: unknown): void {
+		atomic(() => setItemValue(this, value));
+	}
+
+
+	/** Renames the key. */
+	setKey(key: string): void {
+		atomic(() => setItemKey(this, key));
 	}
 }
 

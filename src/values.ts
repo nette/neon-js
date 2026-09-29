@@ -155,6 +155,59 @@ function inRange(n: number | null, min: number, max: number): boolean {
 }
 
 
+/**
+ * Equality of values between a value of the host and a decoded one. A number and a bigint of the
+ * same integer are equal; a plain object does not keep the order of integer-like keys, so with one the
+ * order does not count.
+ */
+export function valuesEqual(a: unknown, b: unknown): boolean {
+	if (typeof b === 'number' || typeof b === 'bigint') {
+		if (typeof a === 'number' && typeof b === 'number') {
+			return a === b || (Number.isNaN(a) && Number.isNaN(b));
+		}
+		const [n, big] = typeof a === 'number' ? [a, b] : [b, a];
+		return typeof n === 'number' ? typeof big === 'bigint' && Number.isInteger(n) && BigInt(n) === big : n === big;
+	} else if (b instanceof NeonDate) {
+		let date = a;
+		try {
+			date = a instanceof Date ? NeonDate.fromDate(a) : a;
+		} catch {
+			// a Date out of the range of the model equals no date
+		}
+		return date instanceof NeonDate && b.equals(date);
+	} else if (b instanceof Entity) {
+		return a instanceof Entity && valuesEqual(a.value, b.value) && valuesEqual(a.attributes, b.attributes);
+	} else if (typeof b === 'object' && b !== null) {
+		const x = entriesOf(a);
+		const y = entriesOf(b);
+		if (!x || !y || x.list !== y.list || x.entries.length !== y.entries.length) {
+			return false;
+		} else if (x.ordered && y.ordered) {
+			return x.entries.every(([key, v], i) => y.entries[i]![0] === key && valuesEqual(v, y.entries[i]![1]));
+		}
+		const map = new Map(y.entries);
+		return x.entries.every(([key, v]) => map.has(key) && valuesEqual(v, map.get(key)));
+	}
+	return a === b;
+}
+
+
+/** Entries of an array of the host with canonical keys, whether they make a list, and whether their order is kept. */
+export function entriesOf(value: unknown): { entries: [string, unknown][]; list: boolean; ordered: boolean } | null {
+	let entries: [string, unknown][];
+	if (Array.isArray(value)) {
+		return { entries: value.map((v, i) => [String(i), v]), list: true, ordered: true };
+	} else if (value instanceof Map) {
+		entries = [...value].map(([key, v]) => [String(key), v]);
+	} else if (typeof value === 'object' && value !== null && [Object.prototype, null].includes(Object.getPrototypeOf(value))) {
+		entries = Object.entries(value);
+	} else {
+		return null;
+	}
+	return { entries, list: entries.length > 0 && entries.every(([key], i) => key === String(i)), ordered: value instanceof Map };
+}
+
+
 const DatePattern = /^(\d{4})-(\d\d?)-(\d\d?)(?:(?:[Tt]| +)(\d\d?):(\d\d):(\d\d)(?:\.(\d*))? *(Z|[-+]\d\d?(?::?\d\d)?)?)?$/;
 
 const SimpleTypes: Record<string, boolean | null> = {
