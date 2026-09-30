@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import { CommentPolicy } from '../src/editing.ts';
 import {
 	ArrayItemNode,
 	BlockArrayNode,
@@ -139,6 +140,16 @@ describe('root', () => {
 			expect(doc.print()).toBe(input);
 		}
 	});
+
+	test('nullable removes the root of either style', () => {
+		for (const input of ['[a]\n', '- a\n']) {
+			const doc = parse(input);
+			doc.nullable = true;
+			doc.removeItem([0]);
+			expect(doc.toValue()).toBe(null);
+			checkTree(doc);
+		}
+	});
 });
 
 
@@ -184,6 +195,41 @@ describe('refused operations change nothing', () => {
 		expectRefused(() => doc.setValue(['a'], Infinity), 'INF', doc);
 		expectRefused(() => doc.setValue(['b'], [1, () => 0]), 'cannot be encoded', doc);
 		expectRefused(() => doc.addItem(['b'], new Map<unknown, number>([[1, 1], ['1', 2]])), 'twice', doc);
+	});
+});
+
+
+describe('removing keeps the comments of others', () => {
+	test('a block opened on the line of a dash', () => {
+		const dropped = parse('- a: 1\n  # about b\n  b: 2\n');
+		dropped.removeItem([0, 'a']);
+		expect(dropped.print()).toBe('-\n  # about b\n  b: 2\n');
+		checkTree(dropped);
+
+		const moved = parse('- a: 1 # about a\n  b: 2\n');
+		moved.removeItem([0, 'a'], { comments: CommentPolicy.MoveToNextToken });
+		expect(moved.print()).toBe('-\n  # about a\n  b: 2\n');
+		checkTree(moved);
+
+		const plain = parse('- a: 1\n  b: 2\n');
+		plain.removeItem([0, 'a']);
+		expect(plain.print()).toBe('- b: 2\n');
+	});
+
+	test('an inline array', () => {
+		for (const [input, path, output] of [
+			['[a, b, c]', [1], '[a, c]'],
+			['[a, b]', [1], '[a]'],
+			['[a, b,]', [1], '[a,]'],
+			['[\n\ta,\n\tb\n]', [1], '[\n\ta\n]'],
+			['[\n\ta, b\n]', [0], '[\n\tb\n]'],
+			['[x, a # c\n, b]', [1], '[x,\nb]'],
+		] as const) {
+			const doc = parse(input);
+			doc.removeItem([...path]);
+			expect(doc.print(), input).toBe(output);
+			checkTree(doc);
+		}
 	});
 });
 

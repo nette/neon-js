@@ -2,8 +2,11 @@ import { NeonError } from './errors.ts';
 import {
 	arrayOf,
 	addItem,
+	CommentPolicy,
 	detachNode,
 	type PathSegment,
+	removeByPath,
+	removeItem,
 	replaceNode,
 	resolvePath,
 	setByPath,
@@ -236,6 +239,9 @@ export class DocumentNode extends Node {
 	#value: ValueNode | null = null;
 	#endOfFile: Token;
 
+	/** Whether removing the last item leaves null instead of an empty collection. */
+	nullable = false;
+
 
 	/** @internal */
 	constructor(value: ValueNode | null, endOfFile: Token) {
@@ -277,7 +283,9 @@ export class DocumentNode extends Node {
 
 
 	clone(): DocumentNode {
-		return new DocumentNode(this.#value?.clone() ?? null, this.#endOfFile.clone());
+		const res = new DocumentNode(this.#value?.clone() ?? null, this.#endOfFile.clone());
+		res.nullable = this.nullable;
+		return res;
 	}
 
 
@@ -328,6 +336,12 @@ export class DocumentNode extends Node {
 			}
 			throw new NeonError(`The value at ${path.join('.')} is not an array`);
 		});
+	}
+
+
+	/** Removes the item at the path with the comments it owns. */
+	removeItem(path: readonly PathSegment[], options: { comments?: CommentPolicy; nullable?: boolean; mergeBlankLines?: boolean } = {}): void {
+		atomic(() => removeByPath(this, path, options.comments ?? CommentPolicy.Drop, options.nullable, options.mergeBlankLines));
 	}
 
 
@@ -390,6 +404,15 @@ export abstract class ArrayNode extends ValueNode {
 	/** Adds an item built from the value, at the end or before the item at the position. */
 	addItem(value: unknown, options: { key?: string; position?: number } = {}): ArrayItemNode {
 		return atomic(() => addItem(this, options.key ?? null, value, options.position));
+	}
+
+
+	/** Removes the item with the comments it owns. */
+	removeItem(item: ArrayItemNode, comments: CommentPolicy = CommentPolicy.Drop): void {
+		if (item.parent !== this) {
+			throw new Error('The item is not in this array.');
+		}
+		atomic(() => removeItem(item, comments));
 	}
 
 
@@ -534,6 +557,9 @@ export class ArrayItemNode extends Node {
 	#value: ValueNode | null;
 	#separator: Token | null;
 
+	/** Whether removing the last item of the value leaves null instead of an empty collection. */
+	nullable = false;
+
 
 	/** @internal */
 	constructor(
@@ -621,13 +647,15 @@ export class ArrayItemNode extends Node {
 
 
 	clone(): ArrayItemNode {
-		return new ArrayItemNode(
+		const res = new ArrayItemNode(
 			this.#bullet?.clone() ?? null,
 			this.#key?.clone() ?? null,
 			this.#colon?.clone() ?? null,
 			this.#value?.clone() ?? null,
 			this.#separator?.clone() ?? null,
 		);
+		res.nullable = this.nullable;
+		return res;
 	}
 
 
@@ -665,6 +693,12 @@ export class ArrayItemNode extends Node {
 	/** Renames the key. */
 	setKey(key: string): void {
 		atomic(() => setItemKey(this, key));
+	}
+
+
+	/** Removes the item from its array, with the comments it owns. */
+	remove(comments: CommentPolicy = CommentPolicy.Drop, mergeBlankLines = false): void {
+		atomic(() => removeItem(this, comments, undefined, mergeBlankLines));
 	}
 }
 

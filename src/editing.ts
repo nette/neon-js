@@ -24,6 +24,16 @@ import { findNeighbour, Token, type TokenKind, Trivia } from './token.ts';
 import { Chain, Entity, entriesOf, literalKey, MaxDepth, NeonDate, valuesEqual } from './values.ts';
 
 
+/** What happens to the comments a removed item owns: the one on its line and those directly above it; the comments inside its value go with it. */
+export const CommentPolicy = {
+	/** The comments that describe the item go with it. */
+	Drop: 'drop',
+	/** The comments stay, above whatever follows. */
+	MoveToNextToken: 'move',
+} as const;
+
+export type CommentPolicy = typeof CommentPolicy[keyof typeof CommentPolicy];
+
 export type PathSegment = string | number | { item: number };
 
 
@@ -563,6 +573,200 @@ function isSpread(array: InlineArrayNode): boolean {
 }
 
 
+// ---- removing
+
+
+/** Removes the key at the path: the item found, and the items whose value it overwrote. */
+export function removeByPath(document: DocumentNode, path: readonly PathSegment[], comments: CommentPolicy, nullable?: boolean, mergeBlankLines = false): void {
+	const item = resolvePath(document, path);
+	const array = item.parent as ArrayNode;
+	if (typeof path.at(-1) === 'object') {
+		removeItem(item, comments, nullable, mergeBlankLines);
+		return;
+	}
+	const keys = itemKeys(array.items);
+	const key = keys[array.items.indexOf(item)];
+	for (const victim of array.items.filter((_, i) => keys[i] === key).reverse()) {
+		removeItem(victim, comments, nullable, mergeBlankLines);
+	}
+}
+
+
+/** Removes an item with the comments it owns. */
+export function removeItem(item: ArrayItemNode, comments: CommentPolicy, nullable?: boolean, mergeBlankLines = false): void {
+	const array = item.parent;
+	if (!(array instanceof BlockArrayNode || array instanceof InlineArrayNode)) {
+		throw new NeonError('The item is not in an array.');
+	}
+
+	const items = array.items;
+	const index = items.indexOf(item);
+	const remaining = items.filter((other) => other !== item);
+	const owner = array.parent;
+	const leaveNull = nullable ?? (owner instanceof ArrayItemNode || owner instanceof DocumentNode ? owner.nullable : false);
+	const before = keysBefore(array);
+
+	if (array instanceof BlockArrayNode && !remaining.length && owner instanceof DocumentNode) {
+		emptyDocument(owner, item, comments, leaveNull);
+		return;
+	} else if (array instanceof BlockArrayNode) {
+		removeFromBlock(item, comments, mergeBlankLines);
+		if (!remaining.length) {
+			emptyBlock(array, item, leaveNull);
+			return;
+		}
+	} else {
+		removeFromInline(array, item, index, comments);
+		if (!remaining.length && leaveNull && owner instanceof ArrayItemNode) {
+			array[setItems]([]);
+			replaceValue(owner, null);
+			return;
+		} else if (!remaining.length && leaveNull && owner instanceof DocumentNode) {
+			array[setItems]([]);
+			emptyRoot(owner);
+			return;
+		}
+	}
+	array[setItems](remaining);
+	keepKeys(array, before, true); // an item removed from a list renumbers the rest, whatever its key
+	guardDashSubblocks(array);
+}
+
+
+function removeFromBlock(item: ArrayItemNode, comments: CommentPolicy, mergeBlankLines: boolean): void {
+	const { preamble, owned } = splitLeading(item.getFirstToken().leadingTrivia);
+	const next = tokenAfter(item.getLastToken());
+	const kept = comments === CommentPolicy.MoveToNextToken
+		? [...withoutIndentation(owned), ...commentLine(item, Layout.indentation(item))]
+		: [];
+	const block = item.parent as BlockArrayNode;
+	if (!startsLine(item)) { // the first item of a block opened on the line of a dash
+		const second = block.items[1];
+		const leading = second?.getFirstToken().leadingTrivia ?? [];
+		if (second && (kept.length || leading.some((t) => t.kind === 'Comment'))) { // the dash ends its line, the comments stay below it
+			trail((block.parent as ArrayItemNode).bullet!, [new Trivia('LineEnding', Layout.lineEnding(item))]);
+			lead(second.getFirstToken(), joinTrivia(kept, leading));
+		} else if (second) { // the next one moves up
+			lead(second.getFirstToken(), []);
+		}
+	} else if (next && mergeBlankLines && !kept.length) { // the narrower of the two gaps stays
+		const gap = Math.min(blankLines(preamble), blankLines(next.leadingTrivia, true));
+		lead(next, joinTrivia(withoutBlankLines(preamble, gap), withoutBlankLines(next.leadingTrivia, 0, true)));
+	} else if (next) {
+		lead(next, joinTrivia([...preamble, ...kept], next.leadingTrivia));
+	}
+	if (!hasLineEnding(item.getLastToken().trailingTrivia) && next?.kind === 'EndOfFile' && !preamble.length && !kept.length) {
+		const before = tokenBefore(item.getFirstToken());
+		if (before) {
+			trail(before, withoutLineEnding(before.trailingTrivia)); // the file keeps ending without a line ending
+		}
+	}
+	lead(item.getFirstToken(), owned); // the item goes with what it owns, for insert()
+}
+
+
+/** The comment on the line of the item as a comment line of its own, for MoveToNextToken. */
+function commentLine(item: ArrayItemNode, indent: string): Trivia[] {
+	for (const token of item.getTokens()) {
+		const comment = token.trailingTrivia.find((t) => t.kind === 'Comment');
+		if (comment) {
+			return [...indentTrivia(indent), comment, new Trivia('LineEnding', Layout.lineEnding(item))];
+		} else if (hasLineEnding(token.trailingTrivia)) {
+			break;
+		}
+	}
+	return [];
+}
+
+
+/** The block lost its last item: an empty inline array takes its place, or null. */
+function emptyBlock(block: BlockArrayNode, last: ArrayItemNode, leaveNull: boolean): void {
+	const owner = block.parent as ArrayItemNode;
+	const head = (owner.colon ?? owner.bullet)!;
+	const onDashLine = !hasLineEnding(head.trailingTrivia); // then the line ending was the item's
+	block[setItems]([]);
+	owner[setSlots]({ value: null }); // the tokens of the block are gone, the head keeps its line ending
+	if (onDashLine) {
+		trail(head, last.getLastToken().trailingTrivia);
+	}
+	if (!leaveNull) {
+		replaceValue(owner, emptyArray(last.key ? '{}' : '[]'));
+	}
+	guardDashSubblocks(owner.parent);
+}
+
+
+/** The document lost its last item: the empty array, or nothing, keeps what stood above the item. */
+function emptyDocument(document: DocumentNode, last: ArrayItemNode, comments: CommentPolicy, leaveNull: boolean): void {
+	const { preamble, owned } = splitLeading(last.getFirstToken().leadingTrivia);
+	const kept = [...preamble, ...comments === CommentPolicy.MoveToNextToken ? [...withoutIndentation(owned), ...commentLine(last, '')] : []];
+	const trailing = last.getLastToken().trailingTrivia;
+	(document.value as BlockArrayNode)[setItems]([]);
+	if (leaveNull) {
+		document[setSlots]({ value: null });
+		lead(document.endOfFile, joinTrivia(kept, document.endOfFile.leadingTrivia));
+		return;
+	}
+	const node = emptyArray(last.key ? '{}' : '[]');
+	lead(node.getFirstToken(), kept);
+	trail(node.getLastToken(), withoutComment(trailing)); // the comment on the line of the item went with it, or was kept above
+	document[setSlots]({ value: node });
+}
+
+
+function emptyArray(brackets: string): ValueNode {
+	return Builder.parse(brackets);
+}
+
+
+/**
+ * Removes an item of an inline array. The item goes with what it owns; the lines around it stay lines:
+ * an item that started its line takes the line ending before itself along, one that did not leaves
+ * the line ending after itself, and what stood above the next item stays there.
+ */
+function removeFromInline(array: InlineArrayNode, item: ArrayItemNode, index: number, comments: CommentPolicy): void {
+	const next = array.items[index + 1];
+	const prev = array.items[index - 1];
+	const first = item.getFirstToken();
+	const eol = Layout.lineEnding(item);
+	const { preamble, owned } = splitLeading(first.leadingTrivia);
+	const ownLine = startsLine(item);
+	const endsLine = item.getTokens().some((token) => hasLineEnding(token.trailingTrivia));
+	const kept = comments === CommentPolicy.MoveToNextToken ? [...withoutIndentation(owned), ...commentLine(item, '')] : [];
+
+	let before = tokenBefore(first)!; // the opening bracket, or the comma of the previous item
+	let between: Trivia[];
+	if (!next && prev?.separator && !item.separator) { // the comma before the last item goes with it
+		const comma = prev.separator;
+		prev[setSlots]({ separator: null });
+		before = prev.getLastToken();
+		between = [...before.trailingTrivia, ...ownLine ? comma.trailingTrivia : []];
+	} else {
+		between = ownLine || (next && !endsLine) ? [...before.trailingTrivia] : withoutTrailingSpace(before.trailingTrivia);
+	}
+	if (!ownLine && endsLine) {
+		between = [...withoutTrailingSpace(between), new Trivia('LineEnding', eol)];
+	}
+	between.push(...preamble, ...kept);
+	if (next && ownLine && !endsLine) { // the next item was on the line of the removed one
+		between.push(...indentTrivia(indentationOf(owned)));
+	}
+	const after = next ? next.getFirstToken() : array.closeBracket;
+	reattach(before, after, [...between, ...after.leadingTrivia]);
+	item[setSlots]({ separator: null }); // the comma separated it in this array
+	lead(first, owned); // the item goes with what it owns, for insert()
+}
+
+
+/** Splits the trivia between two tokens by the convention: up to the first line ending trailing, the rest leading. */
+function reattach(before: Token, after: Token, trivia: readonly Trivia[]): void {
+	const merged = joinAll(trivia);
+	const split = merged.findIndex((t) => t.kind === 'LineEnding') + 1 || merged.length;
+	trail(before, merged.slice(0, split));
+	lead(after, merged.slice(split));
+}
+
+
 // ---- keys
 
 
@@ -896,6 +1100,34 @@ function splitLeading(trivia: readonly Trivia[]): { preamble: Trivia[]; owned: T
 }
 
 
+/** Number of blank lines at the end of the trivia, or at their start. */
+function blankLines(trivia: readonly Trivia[], atStart = false): number {
+	const lines = splitLines(trivia);
+	if (!atStart) {
+		lines.pop(); // the indentation of the line that follows
+		lines.reverse();
+	}
+	let count = 0;
+	while (lines[count]?.every((t) => t.kind !== 'Comment') && lines[count]!.some((t) => t.kind === 'LineEnding')) {
+		count++;
+	}
+	return count;
+}
+
+
+/** The trivia with only the given number of blank lines left at the end, or at the start. */
+function withoutBlankLines(trivia: readonly Trivia[], keep: number, atStart = false): Trivia[] {
+	const lines = splitLines(trivia);
+	const blank = blankLines(trivia, atStart);
+	if (atStart) {
+		lines.splice(keep, blank - keep);
+	} else {
+		lines.splice(lines.length - 1 - blank + keep, blank - keep);
+	}
+	return lines.flat();
+}
+
+
 /** Groups trivia into lines, each ending with its line ending; the last group has none. */
 function splitLines(trivia: readonly Trivia[]): Trivia[][] {
 	const lines: Trivia[][] = [[]];
@@ -918,6 +1150,14 @@ function withoutIndentation(owned: readonly Trivia[]): Trivia[] {
 
 function withoutTrailingSpace(trivia: readonly Trivia[]): Trivia[] {
 	return trivia.at(-1)?.kind === 'Whitespace' ? trivia.slice(0, -1) : [...trivia];
+}
+
+
+/** The trivia without a comment and the space before it. */
+function withoutComment(trivia: readonly Trivia[]): Trivia[] {
+	const i = trivia.findIndex((t) => t.kind === 'Comment');
+	const start = trivia[i - 1]?.kind === 'Whitespace' ? i - 1 : i;
+	return i < 0 ? [...trivia] : joinAll([...trivia.slice(0, start), ...trivia.slice(i + 1)]);
 }
 
 
