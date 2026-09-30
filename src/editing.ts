@@ -467,6 +467,95 @@ function placeInBlock(block: BlockArrayNode, item: ArrayItemNode, at: number, in
 }
 
 
+/**
+ * Inserts an item taken out of a tree, with its comments, reindented to its new place: the common
+ * prefix of the indentation of all its lines moves. The lines inside a multiline string are part
+ * of its token and its value, so they stay.
+ */
+export function insertItem(array: ArrayNode, item: ArrayItemNode, at: number): void {
+	if (!(item instanceof ArrayItemNode)) {
+		throw new TypeError('ArrayItemNode expected.');
+	} else if (item.parent) {
+		throw new Error('The item already has a parent, remove() it first.');
+	} else if (at < 0 || at > array.items.length || !Number.isInteger(at)) {
+		throw new RangeError(`Position ${at} is out of the array.`);
+	} else if (array instanceof InlineArrayNode && (item.bullet || item.value instanceof BlockArrayNode)) {
+		throw new NeonError('A block item cannot stand in an inline array.');
+	} else if (array instanceof BlockArrayNode && !item.bullet && !item.key) {
+		throw new NeonError('An item without a key or a dash cannot stand in a block.');
+	}
+	checkPlaceable(array, item);
+	const key = item.getKeyValue();
+	if (key !== null && array.findItem(key)) {
+		throw new NeonError(`Duplicated key '${key}'`);
+	}
+	const comments = array instanceof InlineArrayNode ? edgeComments(item) : [];
+	if (comments.length && !isSpread(array as InlineArrayNode)) {
+		throw new NeonError('An item with comments cannot stand in an inline array on one line.');
+	}
+
+	const before = keysBefore(array);
+	if (array instanceof BlockArrayNode) {
+		const sibling = array.items[Math.min(at, array.items.length - 1)]!;
+		const indent = Layout.indentation(sibling);
+		const eol = Layout.lineEnding(sibling);
+		reindent(item, item.getIndentation(), indent);
+		if (item.separator) { // a clone of an item of an inline array, with its comma
+			const trailing = withoutTrailingSpace(withoutLineEnding(item.separator.trailingTrivia));
+			item[setSlots]({ separator: null });
+			trail(item.getLastToken(), trailing);
+		}
+		trail(item.getLastToken(), [...withoutLineEnding(item.getLastToken().trailingTrivia), new Trivia('LineEnding', eol)]);
+		placeInBlock(array, item, at, indent, eol);
+	} else {
+		lead(item.getFirstToken(), []);
+		trail(item.getLastToken(), []);
+		if (item.colon && item.value && hasLineEnding(item.colon.trailingTrivia)) { // in brackets, a line ending after the colon means null
+			trail(item.colon, [new Trivia('Whitespace', ' ')]);
+			lead(item.value.getFirstToken(), []);
+		}
+		item[setSlots]({ separator: null });
+		addToInline(array as InlineArrayNode, null, item, at);
+		if (comments.length) {
+			placeCommentsAbove(item, comments);
+		}
+	}
+	keepKeys(array, before, key === null);
+	guardDashSubblocks(array);
+}
+
+
+/**
+ * The comments an item owns at its edges, which an inline array cannot keep in place: the comment lines
+ * directly above it, the comments between its key and a value on a later line, and the comment on its line.
+ */
+function edgeComments(item: ArrayItemNode): Trivia[] {
+	const comments = withoutIndentation(splitLeading(item.getFirstToken().leadingTrivia).owned);
+	if (item.colon && item.value && hasLineEnding(item.colon.trailingTrivia)) {
+		comments.push(...item.colon.trailingTrivia, ...item.value.getFirstToken().leadingTrivia);
+	}
+	comments.push(...item.getLastToken().trailingTrivia);
+	return comments.filter((t) => t.kind === 'Comment');
+}
+
+
+/** Writes the comments as lines of their own above the item, which an inline array spread over lines holds. */
+function placeCommentsAbove(item: ArrayItemNode, comments: readonly Trivia[]): void {
+	const first = item.getFirstToken();
+	const eol = Layout.lineEnding(item);
+	const before = tokenBefore(first)!; // the opening bracket, or a comma
+	if (!hasLineEnding(before.trailingTrivia)) {
+		const indentation = item.parent instanceof InlineArrayNode ? itemIndentation(item.parent) : '';
+		trail(before, [...withoutTrailingSpace(before.trailingTrivia), new Trivia('LineEnding', eol)]);
+		lead(first, indentTrivia(indentation));
+	}
+	const { preamble, owned } = splitLeading(first.leadingTrivia);
+	const indent = indentationOf(owned);
+	const lines = comments.flatMap((comment) => [...indentTrivia(indent), comment, new Trivia('LineEnding', eol)]);
+	lead(first, [...preamble, ...withoutIndentation(owned), ...lines, ...indentTrivia(indent)]);
+}
+
+
 /** Replaces the indentation prefix of every line of the node, its comment lines included. */
 function reindent(node: Node, from: string, to: string): void {
 	const tokens = node.getTokens();

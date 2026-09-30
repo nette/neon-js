@@ -78,6 +78,21 @@ describe('slots', () => {
 		expectRefused(() => (chain.value as EntityChainNode).entities[1]!.value.replaceWith(detached('\'q\'')), 'literal', chain);
 	});
 
+	test('a literal key gets a space after its colon, an inserted item its value on the line of the key', () => {
+		const doc = parse('{"a":b}');
+		(doc.value as InlineArrayNode).items[0]!.key!.replaceWith(detached('new'));
+		expect(doc.print()).toBe('{new: b}');
+		checkTree(doc);
+
+		const source = parse('b:\n  two words\nc: 1\n');
+		const item = source.findItem(['b'])!;
+		item.remove();
+		const target = parse('E(a: 1)');
+		(target.value as EntityNode).attributes!.insert(0, item);
+		expect(target.print()).toBe('E(b: two words, a: 1)');
+		checkTree(target);
+	});
+
 	test('slots that cannot be empty refuse detach()', () => {
 		const doc = parse('a: b(1)\n');
 		expectRefused(() => doc.findItem(['a'])!.key!.detach(), 'cannot be empty', doc);
@@ -234,6 +249,46 @@ describe('removing keeps the comments of others', () => {
 });
 
 
+describe('inserting into an inline array keeps the comments', () => {
+	const take = (source: string): ArrayItemNode => {
+		const item = parse(source).findItem(['x'])!;
+		item.remove();
+		return item;
+	};
+	const commented = '# belongs to x\nx: 1 # note\n';
+
+	test('the comments of the item become lines above it, or it is refused on one line', () => {
+		let doc = parse('{\n\ta: 1, b: 2\n}\n');
+		(doc.value as InlineArrayNode).insert(1, take(commented));
+		expect(doc.print()).toBe('{\n\ta: 1,\n\t# belongs to x\n\t# note\n\tx: 1,\n\tb: 2\n}\n');
+		checkTree(doc);
+
+		doc = parse('{\n\ta: 1\n}\n');
+		(doc.value as InlineArrayNode).insert(0, take('x: # after colon\n\t# above the value\n\t1\n'));
+		expect(doc.print()).toBe('{\n\t# after colon\n\t# above the value\n\tx: 1,\n\ta: 1\n}\n');
+
+		for (const text of ['{}', '{a: 1}']) {
+			const target = parse(text);
+			const item = take(commented);
+			const restore = snapshot(target, item);
+			expect(() => (target.value as InlineArrayNode).insert(0, item)).toThrow('An item with comments cannot stand in an inline array on one line.');
+			restore();
+		}
+		doc = parse('{a: 1}');
+		(doc.value as InlineArrayNode).insert(1, take('x: 1\n'));
+		expect(doc.print()).toBe('{a: 1, x: 1}');
+	});
+
+	test('an item added before another takes only its preamble', () => {
+		const doc = parse('[\n\t# header\n\n\t# about b\n\tb\n]');
+		(doc.value as InlineArrayNode).addItem('a', { position: 0 });
+		expect(doc.print()).toBe('[\n\t# header\n\n\ta,\n\t# about b\n\tb\n]');
+		(doc.value as InlineArrayNode).items[0]!.remove();
+		expect(doc.print()).toBe('[\n\t# header\n\n\t# about b\n\tb\n]');
+	});
+});
+
+
 describe('equal values are a no-op', () => {
 	test.each([
 		['a: 9007199254740993\n', 9007199254740993n],
@@ -294,6 +349,27 @@ describe('construction', () => {
 
 		const free = Token.fromText('x').setTrailingTrivia([Trivia.fromText('# free')]);
 		expect(free.toString()).toBe('x# free');
+	});
+
+	test('clone() is deep and detached', () => {
+		const doc = parse('a: b(1, [2]) # c\n');
+		const copy = doc.clone();
+		expect(copy.print()).toBe(doc.print());
+		const original = new Set(doc.getTokens());
+		expect(copy.getTokens().some((token) => original.has(token))).toBe(false);
+		expect(copy.getTokens()[0]!.origin).toEqual(doc.getTokens()[0]!.origin);
+
+		const item = doc.findItem(['a'])!.clone();
+		expect(item.parent).toBe(null);
+		const target = parse('x: 1\n');
+		(target.value as BlockArrayNode).insert(1, item);
+		expect(target.print()).toBe('x: 1\na: b(1, [2]) # c\n');
+		checkTree(target);
+
+		const inline = parse('x: [k: 1, l: 2]\n');
+		(target.value as BlockArrayNode).insert(2, inline.findItem(['x', 'k'])!.clone());
+		expect(target.print()).toBe('x: 1\na: b(1, [2]) # c\nk: 1\n');
+		checkTree(target);
 	});
 
 	test('a built token has no origin', () => {

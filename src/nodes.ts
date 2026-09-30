@@ -4,6 +4,7 @@ import {
 	addItem,
 	CommentPolicy,
 	detachNode,
+	insertItem,
 	type PathSegment,
 	removeByPath,
 	removeItem,
@@ -413,6 +414,12 @@ export abstract class ArrayNode extends ValueNode {
 			throw new Error('The item is not in this array.');
 		}
 		atomic(() => removeItem(item, comments));
+	}
+
+
+	/** Inserts an item taken out of a tree by remove(), reindented to its new place, with its comments. */
+	insert(position: number, item: ArrayItemNode): void {
+		atomic(() => insertItem(this, item, position));
 	}
 
 
