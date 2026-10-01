@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -41,3 +41,38 @@ test('the loader fails on a broken corpus', () => {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+
+// The runners must fail on a broken expectation; a runner that cannot fail proves nothing.
+// A copy of the corpus with one expectation per category broken is run in a child vitest.
+test('the runners fail on broken expectations', async () => {
+	const top = mkdtempSync(join(tmpdir(), 'neon-selfcheck-'));
+	const dir = join(top, 'corpus');
+	try {
+		mkdirSync(join(top, 'spec'));
+		writeFileSync(join(top, 'spec', 'VERSION'), readFileSync(join(corpusDir, '..', 'spec', 'VERSION')));
+		for (const category of readdirSync(corpusDir, { withFileTypes: true }).filter((e) => e.isDirectory())) {
+			mkdirSync(join(dir, category.name), { recursive: true });
+			for (const file of readdirSync(join(corpusDir, category.name))) {
+				writeFileSync(join(dir, category.name, file), readFileSync(join(corpusDir, category.name, file)));
+			}
+		}
+		writeFileSync(join(dir, 'decode', 'basic-001.json'), '{"type": "int", "value": "999"}\n');
+		writeFileSync(join(dir, 'errors', 'basic-001.error'), 'Some other message\n1:1\n');
+		writeFileSync(join(dir, 'encode', 'basic-001.neon'), 'broken');
+		writeFileSync(join(dir, 'cst', 'literal.dump'), 'DocumentNode\n');
+		writeFileSync(join(dir, 'mutations', 'add-block.expected.neon'), 'broken');
+
+		const { startVitest } = await import('vitest/node');
+		process.env.NEON_CORPUS = dir;
+		const vitest = await startVitest('test', ['tests/corpus.test.ts', 'tests/mutations.test.ts'], { watch: false, reporters: [] });
+		const failed = vitest.state.getFiles().flatMap((file) => file.tasks).flatMap(function collect(task): string[] {
+			return 'tasks' in task ? task.tasks.flatMap(collect) : task.result?.state === 'fail' ? [task.name] : [];
+		});
+		await vitest.close();
+		delete process.env.NEON_CORPUS;
+		expect(failed.sort()).toEqual(['add-block', 'basic-001', 'basic-001', 'basic-001', 'literal'].sort());
+	} finally {
+		rmSync(top, { recursive: true, force: true });
+	}
+}, 120_000);
