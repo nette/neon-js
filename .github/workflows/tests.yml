@@ -25,3 +25,5 @@ jobs:
       - run: npm run spec
       - run: npm run lint
       - run: npm test
+      - run: npm run smoke
+      - run: node bin/neon-lint.js --check tests/neon-spec/corpus/roundtrip tests/neon-spec/corpus/decode

@@ -20,12 +20,29 @@
 		"url": "git+https://github.com/nette/neon-js.git"
 	},
 	"homepage": "https://neon.nette.org",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"bin": {
+		"neon-lint": "./bin/neon-lint.js"
+	},
+	"files": [
+		"dist",
+		"bin"
+	],
 	"engines": {
 		"node": ">=22.0.0"
 	},
 	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"prepare": "npm run build",
 		"spec": "node tests/fetch-spec.mjs",
 		"test": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && vitest run",
+		"smoke": "npm run build && node tests/package-smoke.mjs",
 		"lint": "eslint --cache",
 		"lint:fix": "eslint --cache --fix"
 	},
