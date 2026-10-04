@@ -44,7 +44,8 @@
 		"test": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && vitest run",
 		"smoke": "npm run build && node tests/package-smoke.mjs",
 		"lint": "eslint --cache",
-		"lint:fix": "eslint --cache --fix"
+		"lint:fix": "eslint --cache --fix",
+		"verify-examples": "tsx examples/verify.ts"
 	},
 	"devDependencies": {
 		"@nette/eslint-plugin": "^0.3.1",
