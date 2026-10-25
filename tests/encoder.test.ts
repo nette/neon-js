@@ -14,7 +14,8 @@ test('values of the host', () => {
 	expect(encode(1.0)).toBe('1');
 	expect(encode(-0)).toBe('-0.0');
 	expect(encode(0.1)).toBe('0.1');
-	expect(encode(new Date(Date.UTC(2016, 5, 3, 19, 0, 0, 500)))).toBe('2016-06-03 19:00:00.5 +0000');
+	expect(encode(new Date(Date.UTC(2016, 5, 3, 19, 0, 0, 500)))).toBe('2016-06-03 19:00:00 +0000');
+	expect(encode(new NeonDate(2016, 6, 3, 19, 0, 0, '5', '+02:00'))).toBe('2016-06-03 19:00:00 +0200');
 	expect(encode(new NeonDate(2016, 6, 3))).toBe('2016-06-03');
 	expect(encode(new Entity('Foo', { a: 1 }))).toBe('Foo(a: 1)');
 	expect(encode(new Entity(Chain, [new Entity('a', []), new Entity('b', [1])]))).toBe('a()b(1)');
@@ -128,7 +129,7 @@ function generate(next: () => number, depth: number): unknown {
 		case 2: return pick([0.5, -1.25, 1e-7, 1.5e300, 0.1 + 0.2, -0]);
 		case 3: return pick([2n ** 64n, -(2n ** 70n)]);
 		case 4: return pick(Strings);
-		case 5: return pick([new NeonDate(2016, 6, 3, 19, 0, 0, '5', '+02:00'), new NeonDate(2016, 6, 3)]);
+		case 5: return pick([new NeonDate(2016, 6, 3, 19, 0, 0, null, '+02:00'), new NeonDate(2016, 6, 3)]);
 		case 6:
 		case 7: return Array.from({ length: Math.floor(next() * 4) }, () => generate(next, depth - 1));
 		case 8: return Object.fromEntries(Array.from({ length: Math.floor(next() * 4) }, () => [pick(Strings), generate(next, depth - 1)]));

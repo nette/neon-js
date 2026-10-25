@@ -117,15 +117,12 @@ export class NeonDate {
 	}
 
 
-	/** The date as the encoder writes it. */
+	/** The date as the encoder writes it, without the fraction of a second. */
 	toString(): string {
 		const pad = (n: number, width = 2) => String(n).padStart(width, '0');
 		let res = `${pad(this.year, 4)}-${pad(this.month)}-${pad(this.day)}`;
 		if (this.hour !== null) {
 			res += ` ${pad(this.hour)}:${pad(this.minute!)}:${pad(this.second!)}`;
-			if (this.fraction) {
-				res += '.' + this.fraction;
-			}
 		}
 		if (this.offset) {
 			res += ' ' + this.offset.replace(':', '');

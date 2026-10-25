@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 export const corpusDir = resolve(process.env.NEON_CORPUS ?? join(import.meta.dirname, 'neon-spec', 'corpus'));
 
 /** The version of the specification this implementation follows. */
-const SpecVersion = '0.1';
+const SpecVersion = '1.0.0';
 
 /** The corpus belongs to a checkout of the specification of the version this implementation follows. */
 function checkVersion(root: string): void {

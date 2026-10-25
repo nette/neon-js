@@ -69,8 +69,8 @@ nested block; the third argument is the indentation, a tab by default. Which arr
 yours to say: a function `blockMode(value, path)` instead of `true` is asked for every array, here
 first for the first level only, then for all but lists. An `Entity` is
 `value(attributes)`, and a chain, an entity whose value is `Chain`, is its links written one after
-another, as in `@builder()::create(1)`. A `NeonDate` is written as its components; a JavaScript
-`Date` is an instant and is written in UTC.
+another, as in `@builder()::create(1)`. A `NeonDate` is written as its components, without the
+fraction of a second; a JavaScript `Date` is an instant and is written in UTC.
 
 A string is written without quotes only when the scanner reads it as a single literal that
 evaluates to the same string: so `yes` gets quotes because it is a boolean, `On` because every
