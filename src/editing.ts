@@ -1098,8 +1098,9 @@ export function setByPath(document: DocumentNode, path: readonly PathSegment[], 
 	if (existing) {
 		setItemValue(existing, value);
 		return;
-	} else if (!create || typeof last === 'object') {
-		throw new NeonError(`No item '${segmentText(last)}' in the path ${pathText(path)}, and create is false`);
+	} else if (!create || typeof last === 'object') { // an item by its order is never made
+		const missing = `No item '${segmentText(last)}' in the path ${pathText(path)}`;
+		throw new NeonError(create ? missing : missing + ', and create is false');
 	}
 
 	const key = String(last);

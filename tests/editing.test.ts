@@ -381,3 +381,10 @@ describe('construction', () => {
 		expect(doc.findItem(['b'])!.value!.getFirstToken().origin).toMatchObject({ line: 2, column: 4 });
 	});
 });
+
+
+test('an item by its order is never created', () => {
+	const doc = parse('a: [1]\n');
+	expect(() => doc.setValue(['a', { item: 5 }], 2)).toThrow(/^No item '#5' in the path a\.#5$/);
+	expect(() => doc.setValue(['a', { item: 5 }], 2, { create: false })).toThrow(/in the path a\.#5, and create is false$/);
+});
