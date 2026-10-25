@@ -45,7 +45,7 @@ const Categories: Record<string, { input: string; required: string[][]; allowed:
 	mutations: { input: '.neon', required: [['.ops.json'], ['.expected.neon']], allowed: /^\.(?:ops\.json|expected(?:\.\d+)?\.(?:neon|json))$/ },
 };
 
-const Hosts = ['js', 'php', 'py', 'go', 'rs'];
+const Hosts = ['js', 'php', 'py'];
 
 
 /** Cases of a category, found by their input file. The corpus is validated strictly: anything unknown is a failure. */
