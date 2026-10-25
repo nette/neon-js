@@ -34,11 +34,11 @@ const lines = readFileSync(process.argv[2]!, 'utf8').split('\n').filter(Boolean)
 const stats = { same: 0, deviation: 0, differs: 0 };
 const reasons = (new Map<string, number>);
 const differences: string[] = [];
+const InvalidDate = Symbol('InvalidDate');
 
 for (const line of lines) {
 	const php = JSON.parse(line) as Outcome;
 	let actual: string;
-	let position = null;
 	let value;
 	try {
 		const document = parse(php.input ?? decodeUtf8(readFileSync(php.file!)));
@@ -49,19 +49,27 @@ for (const line of lines) {
 			throw e;
 		}
 		actual = `${e.message}\n${e.position?.line}:${e.position?.column}\n`;
-		position = e.position;
+	}
+
+	let expected: unknown;
+	try {
+		expected = php.value && toHost(php.value);
+	} catch (e) {
+		if (!(e instanceof RangeError)) {
+			throw e;
+		}
+		expected = InvalidDate; // 3.x normalizes an invalid date into another one
 	}
 
 	let reason: string | null = null;
-	if (php.deviation) {
+	if (expected === InvalidDate) {
+		reason = actual === 'accepted' ? 'an invalid date normalized by 3.x' : null;
+	} else if (php.deviation) {
 		const known = Deviations.find(([prefix]) => php.deviation!.startsWith(prefix));
 		reason = known && (known[1] === 'either' || (known[1] === 'accepted') === (actual === 'accepted')) ? known[0] : null;
-	} else if (php.value ? actual === 'accepted' && equal(value, toHost(php.value)) : actual === php.error) {
+	} else if (php.value ? actual === 'accepted' && equal(value, expected) : actual === php.error) {
 		stats.same++;
 		continue;
-	} else if (actual.startsWith('Invalid date ') && position) { // 3.x normalizes such a date, then accepts or fails later
-		const [line, column] = (php.error?.split('\n')[1] ?? '').split(':').map(Number);
-		reason = php.value || line! > position.line || (line === position.line && column! > position.column) ? 'an invalid date normalized by 3.x' : null;
 	}
 
 	if (reason) {

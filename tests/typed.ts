@@ -29,8 +29,13 @@ export function toHost(typed: Typed): NeonValue {
 		}
 		case 'float':
 			return { 'INF': Infinity, '-INF': -Infinity, 'NAN': NaN }[typed.value] ?? Number(typed.value);
-		case 'date':
-			return NeonDate.parse(typed.value)!;
+		case 'date': {
+			const date = NeonDate.parse(typed.value);
+			if (!date) {
+				throw new RangeError(`Invalid date ${typed.value}`);
+			}
+			return date;
+		}
 		case 'entity':
 			return new Entity(toHost(typed.value), toHost(typed.attributes) as Entity['attributes']);
 		case 'chain':
