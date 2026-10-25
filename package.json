@@ -28,7 +28,7 @@
 		}
 	},
 	"bin": {
-		"neon-lint": "./bin/neon-lint.js"
+		"neon-lint": "bin/neon-lint.js"
 	},
 	"files": [
 		"dist",
