@@ -272,25 +272,45 @@ class Parser {
 		const end = Pairs[open.kind]!;
 		const items: ArrayItemNode[] = [];
 		const keys = new KeyCheck(this);
+		let next: [ValueNode, Token] | null = null; // the key and the colon of the next item, read on the line after a key without a value
 
 		while (true) {
-			while (this.consume('Newline')) { ; }
-			const close = this.consumeToken(end);
-			if (close) {
-				return new InlineArrayNode(open, items, close);
+			let head: ValueNode;
+			let colon: Token | null;
+			if (next) {
+				[head, colon] = next;
+				next = null;
+			} else {
+				while (this.consume('Newline')) { ; }
+				const close = this.consumeToken(end);
+				if (close) {
+					return new InlineArrayNode(open, items, close);
+				}
+				head = this.parseValue();
+				colon = this.consumeColon();
 			}
 
-			const head = this.parseValue();
 			let item: ArrayItemNode;
-			const colon = this.consumeToken('Colon', 'Equals');
 			if (colon) {
 				const key = keys.add(head);
-				const value = this.isNext('Newline', 'Comma', end) ? null : this.parseValue();
+				let value: ValueNode | null = null;
+				const lineEnd = this.consume('Newline');
+				if (!this.isNext('Comma', end)) {
+					value = this.parseValue();
+					const nextColon = lineEnd ? this.consumeColon() : null;
+					if (nextColon) {
+						next = [value, nextColon];
+						value = null;
+					}
+				}
 				item = keys.item(null, key, colon, value);
 			} else {
 				item = keys.item(null, null, null, head);
 			}
 			items.push(item);
+			if (next) {
+				continue;
+			}
 
 			const before = this.mark();
 			while (this.consume('Newline')) { ; }
@@ -304,6 +324,19 @@ class Parser {
 				this.error();
 			}
 		}
+	}
+
+
+	/** The colon or the equals sign after a key in an inline array, which may stand on a later line. */
+	private consumeColon(): Token | null {
+		const mark = this.mark();
+		while (this.consume('Newline')) { ; }
+		const colon = this.consumeToken('Colon', 'Equals');
+		if (!colon) {
+			this.#i = mark.i;
+			this.#newlineTaken = mark.newlineTaken;
+		}
+		return colon;
 	}
 
 

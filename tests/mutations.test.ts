@@ -142,7 +142,8 @@ function applyToModel(model: Model, op: Operation): Model {
 			parent.splice(op.position ?? parent.length, 0, plain);
 		} else {
 			const entries = Object.entries(parent as object);
-			entries.splice(op.position ?? entries.length, 0, [op.key!, plain]);
+			const key = op.key ?? String(Math.max(-1, ...entries.map(([k]) => k).filter((k) => /^(0|-?[1-9]\d*)$/.test(k)).map(Number)) + 1);
+			entries.splice(op.position ?? entries.length, 0, [key, plain]);
 			replaceContents(parent as Record<string, Model>, Object.fromEntries(entries));
 		}
 	} else if (op.op === 'remove') {

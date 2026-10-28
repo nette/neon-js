@@ -29,6 +29,9 @@ covers what is specific to this implementation.
   structure of `parseBlock()`, `parseBraces()` and `parseEntity()` parallel to
   `Nette\Neon\Parser` of 3.x; a "cleaner" parser that accepts the same inputs still fails the
   corpus on the errors.
+- **In an inline array, a value on the line after a key is the value of that key**, unlike in
+  3.x (specification 1.1). It is read once; when a colon follows it, it is handed over as the key
+  of the next item instead of being parsed again.
 - **Line endings are trivia, but the parser sees them.** Before token *i* stands a line break
   when the trailing trivia of token *i-1* contain a line ending; the stream presents it as the
   pseudo-kind `Newline`, consumed once per gap, as the run of Newline tokens of 3.x was. An error
@@ -87,8 +90,8 @@ covers what is specific to this implementation.
 - **New text comes from `encode()`**: `Builder` encodes the value, indents it for its place, parses
   it and takes the nodes out of that temporary document. Do not build tokens by hand for values.
 - After an edit, `keepKeys()` writes out implicit keys that would otherwise change, and
-  `guardDashSubblocks()` and `guardEnd()` defuse the traps of mutations.md §4a; every public
-  operation that changes an array calls them. A new operation must too.
+  `guardGrammar()` defuses the traps of mutations.md §4a; every public operation that changes an
+  array calls them. A new operation must too.
 - `splitLeading()` decides what an item owns: the comment lines directly above it and its
   indentation; the byte order mark always stays with the document.
 

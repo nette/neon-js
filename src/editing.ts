@@ -55,14 +55,25 @@ export function setItemValue(item: ArrayItemNode, value: unknown): void {
 	} else {
 		replaceValue(item, styledScalar(old, value) ?? Builder.value(value, placeOf(item, old, value)));
 	}
-	guardDashSubblocks(item.parent);
+	guardGrammar(item.parent);
 }
 
 
 /** Puts the node into the value slot or empties it, without the comparison and styling of setItemValue(). */
 export function setItemNode(item: ArrayItemNode, node: ValueNode | null): void {
 	replaceValue(item, node);
-	guardDashSubblocks(item.parent);
+	guardGrammar(item.parent);
+}
+
+
+/** Repairs what the grammar would read differently in the array after an edit. */
+function guardGrammar(array: Node | null): void {
+	if (array instanceof BlockArrayNode) {
+		guardEnd(array);
+		guardDashSubblocks(array);
+	} else if (array instanceof InlineArrayNode) {
+		guardKeysWithoutValue(array);
+	}
 }
 
 
@@ -71,11 +82,7 @@ export function setItemNode(item: ArrayItemNode, node: ValueNode | null): void {
  * So a key without a value followed by a dash gets an explicit null, and a dash right after a dash
  * subblock gets its key written out, which ends the subblock.
  */
-function guardDashSubblocks(block: Node | null): void {
-	if (!(block instanceof BlockArrayNode)) {
-		return;
-	}
-	guardEnd(block);
+function guardDashSubblocks(block: BlockArrayNode): void {
 	block.items.forEach((item, i) => {
 		const next = block.items[i + 1];
 		if (!item.key || !next?.bullet) {
@@ -84,6 +91,17 @@ function guardDashSubblocks(block: Node | null): void {
 			replaceValue(item, literal('null'));
 		} else if (item.value instanceof BlockArrayNode && Layout.indentation(item.value.items[0]!) === Layout.indentation(item)) {
 			giveKey(next, itemKeys(block.items)[i + 1]!);
+		}
+	});
+}
+
+
+/** Keeps an item without a key from reading as the value of a key without a value on the line above. */
+function guardKeysWithoutValue(array: InlineArrayNode): void {
+	array.items.forEach((item, i) => {
+		const next = array.items[i + 1];
+		if (item.key && item.value === null && !item.separator && next && !next.key) {
+			replaceValue(item, literal('null'));
 		}
 	});
 }
@@ -342,7 +360,7 @@ export function addItem(array: ArrayNode, key: string | null, value: unknown, po
 		? addToBlock(array, key, value, at)
 		: addToInline(array as InlineArrayNode, key, value, at);
 	keepKeys(array, before, key === null);
-	guardDashSubblocks(array);
+	guardGrammar(array);
 	return item;
 }
 
@@ -521,7 +539,7 @@ export function insertItem(array: ArrayNode, item: ArrayItemNode, at: number): v
 		}
 	}
 	keepKeys(array, before, key === null);
-	guardDashSubblocks(array);
+	guardGrammar(array);
 }
 
 
@@ -718,7 +736,7 @@ export function removeItem(item: ArrayItemNode, comments: CommentPolicy, nullabl
 	}
 	array[setItems](remaining);
 	keepKeys(array, before, true); // an item removed from a list renumbers the rest, whatever its key
-	guardDashSubblocks(array);
+	guardGrammar(array);
 }
 
 
@@ -781,7 +799,7 @@ function emptyBlock(block: BlockArrayNode, last: ArrayItemNode, leaveNull: boole
 	if (!leaveNull) {
 		replaceValue(owner, emptyArray(last.key ? '{}' : '[]'));
 	}
-	guardDashSubblocks(owner.parent);
+	guardGrammar(owner.parent);
 }
 
 
@@ -894,7 +912,7 @@ export function setItemKey(item: ArrayItemNode, key: string | StringNode | Liter
 	if (array && before) {
 		before.keys.set(item, value);
 		keepKeys(array, before, false);
-		guardDashSubblocks(array);
+		guardGrammar(array);
 	}
 }
 
